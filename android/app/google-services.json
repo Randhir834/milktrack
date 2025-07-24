@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "543164057676",
+    "project_id": "milktrack-a066e",
+    "storage_bucket": "milktrack-a066e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:543164057676:android:aee1092537dce211550ce9",
+        "android_client_info": {
+          "package_name": "com.example.milktrack"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBpVxGAQi7tmqIclKbePKMKlk1bqf2XKZQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:543164057676:android:42c58ce77596cd79550ce9",
+        "android_client_info": {
+          "package_name": "com.randhir.milktrack"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBpVxGAQi7tmqIclKbePKMKlk1bqf2XKZQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

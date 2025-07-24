@@ -1,0 +1,65 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    function isAdmin() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin';
+    }
+    function isStaff() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'staff';
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      // Allow user to create their own document
+      allow create: if isSignedIn() && isOwner(userId);
+
+      // Allow read/update/delete only for the user themselves
+      allow read, update, delete: if isSignedIn() && isOwner(userId);
+
+      // Prevent users from changing their own role after registration
+      allow update: if isSignedIn() && isOwner(userId) &&
+        (!('type' in request.resource.data) || resource.data.type == request.resource.data.type);
+    }
+
+    // --- Sales Collection ---
+    match /sales/{saleId} {
+      allow create, read: if isSignedIn() && (isAdmin() || isStaff());
+      allow update, delete: if isSignedIn() && isAdmin();
+    }
+
+    // --- Productions Collection ---
+    match /productions/{productionId} {
+      allow create: if isSignedIn() && (isAdmin() || isStaff()) && request.resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (isAdmin() || (isStaff() && resource.data.userId == request.auth.uid));
+      allow update, delete: if isSignedIn() && (isAdmin() || (isStaff() && resource.data.userId == request.auth.uid));
+    }
+
+    // --- Customers Collection ---
+    match /customers/{customerId} {
+      allow create, read: if isSignedIn() && (isAdmin() || isStaff());
+      allow update, delete: if isSignedIn() && isAdmin();
+    }
+
+    // --- Expenses Collection ---
+    match /expenses/{expenseId} {
+      allow create, read: if isSignedIn() && (isAdmin() || isStaff());
+      allow update, delete: if isSignedIn() && isAdmin();
+    }
+
+    // --- Deny everything else ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
