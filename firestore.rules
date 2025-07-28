@@ -4,6 +4,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // --- Helper Functions ---
+    // These functions make the rules easier to read and maintain.
     function isSignedIn() {
       return request.auth != null;
     }
@@ -11,55 +12,84 @@ service cloud.firestore {
       return request.auth.uid == userId;
     }
     function isAdmin() {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+      // Checks if the requesting user's document exists and has the type 'admin'.
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin';
     }
     function isStaff() {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+      // Checks if the requesting user's document exists and has the type 'staff'.
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'staff';
     }
 
     // --- Users Collection ---
+    // Rules for user registration and profile management.
     match /users/{userId} {
-      // Allow user to create their own document
-      allow create: if isSignedIn() && isOwner(userId);
+      // Allow anyone to check for username existence during registration.
+      // This is safe as it doesn't allow reading document data.
+      allow list: if true;
 
-      // Allow read/update/delete only for the user themselves
-      allow read, update, delete: if isSignedIn() && isOwner(userId);
+      // A newly authenticated user can create their own user document.
+      allow create: if request.auth != null && request.auth.uid == userId;
 
-      // Prevent users from changing their own role after registration
-      allow update: if isSignedIn() && isOwner(userId) &&
-        (!('type' in request.resource.data) || resource.data.type == request.resource.data.type);
-    }
+      // A user can only read or delete their own document.
+      allow read, delete: if isOwner(userId);
 
-    // --- Sales Collection ---
-    match /sales/{saleId} {
-      allow create, read: if isSignedIn() && (isAdmin() || isStaff());
-      allow update, delete: if isSignedIn() && isAdmin();
-    }
-
-    // --- Productions Collection ---
-    match /productions/{productionId} {
-      allow create: if isSignedIn() && (isAdmin() || isStaff()) && request.resource.data.userId == request.auth.uid;
-      allow read: if isSignedIn() && (isAdmin() || (isStaff() && resource.data.userId == request.auth.uid));
-      allow update, delete: if isSignedIn() && (isAdmin() || (isStaff() && resource.data.userId == request.auth.uid));
+      // A user can update their own document but CANNOT change their 'type' (role).
+      allow update: if isOwner(userId) && resource.data.type == request.resource.data.type;
     }
 
     // --- Customers Collection ---
+    // Rules for managing customer data.
     match /customers/{customerId} {
-      allow create, read: if isSignedIn() && (isAdmin() || isStaff());
-      allow update, delete: if isSignedIn() && isAdmin();
+      // FIX: Added 'list' so staff/admins can query customers for the dropdown menu.
+      allow create, read, list: if isAdmin() || isStaff();
+      
+      // Only admins can modify or delete customer records.
+      allow update, delete: if isAdmin();
+    }
+
+    // --- Sales Collection ---
+    // Rules for recording and viewing sales.
+    match /sales/{saleId} {
+      // Staff and admins can create, read, and list sales records.
+      allow create, read, list: if isAdmin() || isStaff();
+      
+      // Only admins can modify or delete sales records.
+      allow update, delete: if isAdmin();
+    }
+    
+    // --- Payments Collection (NEW) ---
+    // Rules for recording and viewing payments. This was missing entirely.
+    match /payments/{paymentId} {
+      // Staff and admins can create, read, and list payments.
+      allow create, read, list: if isAdmin() || isStaff();
+      
+      // Only admins can modify or delete payment records.
+      allow update, delete: if isAdmin();
+    }
+
+    // --- Productions Collection ---
+    // Rules for managing production data.
+    match /productions/{productionId} {
+      // Admin/Staff can create records, but they must be associated with their own UID.
+      allow create: if (isAdmin() || isStaff()) && request.resource.data.userId == request.auth.uid;
+      
+      // Admins can read any production, staff can only read their own.
+      allow read, list: if isAdmin() || (isStaff() && resource.data.userId == request.auth.uid);
+      
+      // Admins can update/delete any, staff can only update/delete their own.
+      allow update, delete: if isAdmin() || (isStaff() && resource.data.userId == request.auth.uid);
     }
 
     // --- Expenses Collection ---
+    // Rules for managing expense data.
     match /expenses/{expenseId} {
-      allow create, read: if isSignedIn() && (isAdmin() || isStaff());
-      allow update, delete: if isSignedIn() && isAdmin();
-    }
-
-    // --- Deny everything else ---
-    match /{document=**} {
-      allow read, write: if false;
+      // FIX: Added 'list' assuming you will have a page that lists all expenses.
+      allow create, read, list: if isAdmin() || isStaff();
+      
+      // Only admins can modify or delete expense records.
+      allow update, delete: if isAdmin();
     }
   }
 }

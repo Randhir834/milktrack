@@ -31,6 +31,7 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> loginWithPhoneAndPassword() async {
     final phone = phoneController.text.trim();
     final password = passwordController.text.trim();
+    
     if (phone.isEmpty || !RegExp(r'^\d{10}$').hasMatch(phone)) {
       showMessage("Please enter a valid 10-digit phone number");
       return;
@@ -39,36 +40,45 @@ class _LoginPageState extends State<LoginPage> {
       showMessage("Please enter your password");
       return;
     }
+    
     setState(() { isLoading = true; });
+    
     try {
       // Find user by phone in Firestore
       final userQuery = await FirebaseFirestore.instance
           .collection('users')
           .where('phone', isEqualTo: phone)
           .get();
+          
       if (userQuery.docs.isEmpty) {
         showMessage("No user found for this phone number.");
         setState(() { isLoading = false; });
         return;
       }
+      
       final userData = userQuery.docs.first.data();
       final email = userData['email'] as String?;
+      
       if (email == null || email.isEmpty) {
         showMessage("No email found for this user. Please contact support.");
         setState(() { isLoading = false; });
         return;
       }
+      
       // Sign in with email and password
       final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
+      
       if (userCredential.user != null) {
         final userType = userData['type'] as String? ?? 'staff';
         final username = userData['username'] as String? ?? 'User';
+        
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('username', username);
         await prefs.setString('userType', userType);
+        
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/home');
         }
@@ -80,10 +90,78 @@ class _LoginPageState extends State<LoginPage> {
         case 'wrong-password':
           msg = 'Incorrect phone number or password.';
           break;
+        case 'invalid-email':
+          msg = 'Invalid email format.';
+          break;
+        case 'user-disabled':
+          msg = 'This account has been disabled.';
+          break;
+        case 'too-many-requests':
+          msg = 'Too many failed attempts. Please try again later.';
+          break;
         default:
           msg = 'Login failed: ${e.message ?? e.code}';
       }
       showMessage(msg);
+    } catch (e) {
+      print('Login error: $e');
+      showMessage('An unexpected error occurred. Please try again.');
+    } finally {
+      if (mounted) setState(() { isLoading = false; });
+    }
+  }
+
+  Future<void> _handleForgotPassword() async {
+    final phone = phoneController.text.trim();
+    
+    if (phone.isEmpty || !RegExp(r'^\d{10}$').hasMatch(phone)) {
+      showMessage('Please enter a valid phone number to reset password.');
+      return;
+    }
+    
+    setState(() { isLoading = true; });
+    
+    try {
+      // Find user by phone to get their email
+      final userQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: phone)
+          .get();
+          
+      if (userQuery.docs.isEmpty) {
+        showMessage('No user found for this phone number.');
+        setState(() { isLoading = false; });
+        return;
+      }
+      
+      final userData = userQuery.docs.first.data();
+      final email = userData['email'] as String?;
+      
+      if (email == null || email.isEmpty) {
+        showMessage('No email found for this user. Please contact support.');
+        setState(() { isLoading = false; });
+        return;
+      }
+      
+      // Send password reset email
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      showMessage('Password reset email sent! Check your inbox.');
+    } on FirebaseAuthException catch (e) {
+      String msg;
+      switch (e.code) {
+        case 'user-not-found':
+          msg = 'No user found for that email.';
+          break;
+        case 'invalid-email':
+          msg = 'The email address is invalid.';
+          break;
+        default:
+          msg = 'Failed to send reset email: ${e.message ?? e.code}';
+      }
+      showMessage(msg);
+    } catch (e) {
+      print('Forgot password error: $e');
+      showMessage('An unexpected error occurred. Please try again.');
     } finally {
       if (mounted) setState(() { isLoading = false; });
     }
@@ -261,33 +339,7 @@ class _LoginPageState extends State<LoginPage> {
                   child: Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () async {
-                        final email = phoneController.text.trim();
-                        if (email.isEmpty) {
-                          showMessage('Please enter your phone number to reset password.');
-                          return;
-                        }
-                        setState(() { isLoading = true; });
-                        try {
-                          await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-                          showMessage('Password reset email sent! Check your inbox.');
-                        } on FirebaseAuthException catch (e) {
-                          String msg;
-                          switch (e.code) {
-                            case 'user-not-found':
-                              msg = 'No user found for that email.';
-                              break;
-                            case 'invalid-email':
-                              msg = 'The email address is invalid.';
-                              break;
-                            default:
-                              msg = 'Failed to send reset email: \\${e.message ?? e.code}';
-                          }
-                          showMessage(msg);
-                        } finally {
-                          if (mounted) setState(() { isLoading = false; });
-                        }
-                      },
+                      onPressed: _handleForgotPassword,
                       child: Text(
                         'Forgot Password?',
                         style: GoogleFonts.poppins(

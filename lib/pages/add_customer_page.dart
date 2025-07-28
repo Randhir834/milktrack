@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-// No need for 'dart:math' as we are not generating random IDs
 
 class AddCustomerPage extends StatefulWidget {
-  const AddCustomerPage({Key? key}) : super(key: key);
+  final Map<String, dynamic>? existingCustomer;
+  final String? documentId;
+  
+  const AddCustomerPage({
+    Key? key, 
+    this.existingCustomer,
+    this.documentId,
+  }) : super(key: key);
 
   @override
   State<AddCustomerPage> createState() => _AddCustomerPageState();
@@ -15,87 +21,144 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
-  final TextEditingController _milkPriceController = TextEditingController();
-  final TextEditingController _userIdController = TextEditingController(); // Keep this for manual input
+  final TextEditingController _userIdController = TextEditingController();
+  final TextEditingController _globalPriceController = TextEditingController();
   bool _isSubmitting = false;
+  bool _isEditing = false;
 
   @override
   void initState() {
     super.initState();
+    _isEditing = widget.existingCustomer != null;
     _loadMilkPrice();
-    // Removed _generateUserId() call here
+    if (_isEditing) {
+      _initializeWithExistingData();
+    }
+  }
+
+  void _initializeWithExistingData() {
+    final customer = widget.existingCustomer!;
+    _nameController.text = customer['name'] ?? '';
+    _phoneController.text = customer['phone'] ?? '';
+    _addressController.text = customer['address'] ?? '';
+    _userIdController.text = customer['userId'] ?? '';
   }
 
   Future<void> _loadMilkPrice() async {
     final prefs = await SharedPreferences.getInstance();
-    final price = prefs.getString('milkPrice') ?? '';
-    _milkPriceController.text = price;
+    final price = prefs.getString('globalMilkPrice');
+    print('DEBUG: Loading global milk price in AddCustomerPage: $price');
+    
+    // Always update the controller, even if price is null or empty
+    if (price != null && price.isNotEmpty && price != '0') {
+      print('DEBUG: Setting global price controller to: $price');
+      setState(() {
+        _globalPriceController.text = price;
+      });
+    } else {
+      print('DEBUG: No valid global price found in AddCustomerPage, clearing controller');
+      setState(() {
+        _globalPriceController.clear();
+      });
+    }
   }
 
-  Future<void> _saveMilkPrice(String price) async {
+  Future<void> _saveGlobalMilkPrice(String price) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('milkPrice', price);
+    print('DEBUG: Attempting to save global milk price: $price');
+    // Only save if price is not empty
+    if (price.isNotEmpty && price != '0') {
+      await prefs.setString('globalMilkPrice', price);
+      print('DEBUG: Global milk price saved successfully: $price');
+      
+      // Verify the save by reading it back
+      final savedPrice = prefs.getString('globalMilkPrice');
+      print('DEBUG: Verification - Read back global milk price: $savedPrice');
+    } else {
+      print('DEBUG: Not saving global milk price - invalid value: $price');
+    }
   }
-
-  // Removed the _generateUserId function entirely
 
   @override
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
-    _milkPriceController.dispose();
     _userIdController.dispose();
+    _globalPriceController.dispose();
     super.dispose();
   }
 
   Future<void> _saveCustomer() async {
-    if (!_formKey.currentState!.validate()) return; // Validate form fields first
+    if (!_formKey.currentState!.validate()) return;
     
     setState(() => _isSubmitting = true);
 
     final enteredUserId = _userIdController.text.trim();
 
     try {
-      // --- Start Uniqueness Check ---
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('customers')
-          .where('userId', isEqualTo: enteredUserId)
-          .get();
+      // Check uniqueness only for new customers or if userId changed
+      if (!_isEditing || (widget.existingCustomer?['userId'] != enteredUserId)) {
+        final querySnapshot = await FirebaseFirestore.instance
+            .collection('customers')
+            .where('userId', isEqualTo: enteredUserId)
+            .get();
 
-      if (querySnapshot.docs.isNotEmpty) {
-        // If documents are found, it means the userId already exists
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('User ID already exists. Please enter a unique ID.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return; // Stop the save process
+        if (querySnapshot.docs.isNotEmpty) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('User ID already exists. Please enter a unique ID.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
       }
-      // --- End Uniqueness Check ---
 
-      await _saveMilkPrice(_milkPriceController.text.trim());
-      await FirebaseFirestore.instance.collection('customers').add({
+      await _saveGlobalMilkPrice(_globalPriceController.text.trim());
+      
+      final customerData = {
         'name': _nameController.text.trim(),
         'phone': _phoneController.text.trim(),
         'address': _addressController.text.trim(),
-        'milkPrice': _milkPriceController.text.trim(),
-        'userId': enteredUserId, // Use the manually entered and validated ID
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+        'userId': enteredUserId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      if (_isEditing) {
+        // Update existing customer
+        await FirebaseFirestore.instance
+            .collection('customers')
+            .doc(widget.documentId)
+            .update(customerData);
+      } else {
+        // Add new customer
+        customerData['createdAt'] = FieldValue.serverTimestamp();
+        await FirebaseFirestore.instance
+            .collection('customers')
+            .add(customerData);
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Customer added successfully'), backgroundColor: Colors.green),
+        SnackBar(
+          content: Text(_isEditing ? 'Customer updated successfully' : 'Customer added successfully'), 
+          backgroundColor: Colors.green
+        ),
       );
-      // Clear form for a new entry, keeping milk price
-      _formKey.currentState?.reset();
-      _nameController.clear();
-      _phoneController.clear();
-      _addressController.clear();
-      _userIdController.clear(); // Clear User ID for the next manual entry
+      
+      if (!_isEditing) {
+        // Clear form for new entry, keeping global price
+        _formKey.currentState?.reset();
+        _nameController.clear();
+        _phoneController.clear();
+        _addressController.clear();
+        _userIdController.clear();
+      } else {
+        // Go back to previous screen after editing
+        Navigator.pop(context, true);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -112,7 +175,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FA),
       appBar: AppBar(
-        title: const Text('Add Customer'),
+        title: Text(_isEditing ? 'Edit Customer' : 'Add Customer'),
         elevation: 0,
         backgroundColor: theme.primaryColor,
       ),
@@ -131,7 +194,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        'Customer Details',
+                        _isEditing ? 'Edit Customer Details' : 'Customer Details',
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: theme.primaryColor,
@@ -139,6 +202,59 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 18),
+                      // Global Price Setting
+                      TextFormField(
+                        controller: _globalPriceController,
+                        decoration: InputDecoration(
+                          labelText: 'Global Milk Price (₹)',
+                          prefixIcon: const Icon(Icons.settings, color: Colors.orange),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          filled: true,
+                          fillColor: Colors.orange.shade50,
+                          hintText: 'Set default price for all customers',
+                        ),
+                        keyboardType: TextInputType.numberWithOptions(decimal: true),
+                        textInputAction: TextInputAction.done,
+                      ),
+                      const SizedBox(height: 12),
+                      // Separate Save Global Price Button
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          final price = _globalPriceController.text.trim();
+                          if (price.isEmpty || price == '0') {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter a valid price'),
+                                backgroundColor: Colors.orange,
+                              ),
+                            );
+                            return;
+                          }
+                          await _saveGlobalMilkPrice(price);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Global milk price saved successfully'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.save),
+                        label: const Text('Save Global Price', style: TextStyle(fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange.shade600,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      // Divider
+                      Container(
+                        height: 1,
+                        color: Colors.grey.shade300,
+                      ),
+                      const SizedBox(height: 20),
                       TextFormField(
                         controller: _nameController,
                         decoration: InputDecoration(
@@ -176,25 +292,8 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
                           fillColor: Colors.white,
                         ),
                         validator: (value) => value == null || value.trim().isEmpty ? 'Please enter address' : null,
-                        textInputAction: TextInputAction.done,
-                        maxLines: 2,
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _milkPriceController,
-                        decoration: InputDecoration(
-                          labelText: 'Milk Price',
-                          prefixIcon: const Icon(Icons.currency_rupee, color: Colors.teal),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          filled: true,
-                          fillColor: Colors.white,
-                        ),
-                        keyboardType: TextInputType.numberWithOptions(decimal: true),
-                        validator: (value) => value == null || value.trim().isEmpty ? 'Please enter milk price' : null,
-                        onChanged: (value) {
-                          _saveMilkPrice(value);
-                        },
                         textInputAction: TextInputAction.next,
+                        maxLines: 2,
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
@@ -207,8 +306,8 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
                           fillColor: Colors.white,
                         ),
                         validator: (value) => value == null || value.trim().isEmpty ? 'Please enter User ID' : null,
-                        keyboardType: TextInputType.text, // Allow any text for ID, not just numbers
-                        textInputAction: TextInputAction.next,
+                        keyboardType: TextInputType.text,
+                        textInputAction: TextInputAction.done,
                       ),
                       const SizedBox(height: 22),
                       ElevatedButton.icon(
@@ -222,8 +321,8 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
                                   valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                 ),
                               )
-                            : const Icon(Icons.save),
-                        label: const Text('Save Customer', style: TextStyle(fontSize: 16)),
+                            : Icon(_isEditing ? Icons.update : Icons.save),
+                        label: Text(_isEditing ? 'Update Customer' : 'Save Customer', style: const TextStyle(fontSize: 16)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: theme.primaryColor,
                           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -234,93 +333,6 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
                     ],
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 28),
-            Row(
-              children: [
-                const Icon(Icons.people, color: Colors.teal),
-                const SizedBox(width: 8),
-                Text(
-                  'Customer List',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('customers').orderBy('createdAt', descending: true).snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return Center(child: Text('Error: ${snapshot.error}'));
-                  }
-                  final docs = snapshot.data?.docs ?? [];
-                  if (docs.isEmpty) {
-                    return const Center(child: Text('No customers found.'));
-                  }
-                  return ListView.separated(
-                    itemCount: docs.length,
-                    separatorBuilder: (context, i) => const SizedBox(height: 10),
-                    itemBuilder: (context, i) {
-                      final data = docs[i].data() as Map<String, dynamic>;
-                      return Card(
-                        elevation: 3,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: Colors.teal.shade100,
-                            child: const Icon(Icons.person, color: Colors.teal),
-                          ),
-                          title: Text(
-                            data['name'] ?? '',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  const Icon(Icons.phone, size: 16, color: Colors.teal),
-                                  const SizedBox(width: 4),
-                                  Text(data['phone'] ?? ''),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  const Icon(Icons.home, size: 16, color: Colors.teal),
-                                  const SizedBox(width: 4),
-                                  Expanded(child: Text(data['address'] ?? '')),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  const Icon(Icons.currency_rupee, size: 16, color: Colors.teal),
-                                  const SizedBox(width: 4),
-                                  Text('Milk Price: ₹' + (data['milkPrice'] ?? '')),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  const Icon(Icons.confirmation_number, size: 16, color: Colors.teal),
-                                  const SizedBox(width: 4),
-                                  Text('User ID: ' + (data['userId'] ?? '')), // Display the manually entered User ID
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                },
               ),
             ),
           ],

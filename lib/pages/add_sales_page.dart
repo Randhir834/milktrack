@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class SalesPage extends StatefulWidget {
-  const SalesPage({Key? key}) : super(key: key);
+class AddSalesPage extends StatefulWidget {
+  const AddSalesPage({Key? key}) : super(key: key);
 
   @override
-  State<SalesPage> createState() => _SalesPageState();
+  State<AddSalesPage> createState() => _AddSalesPageState();
 }
 
-class _SalesPageState extends State<SalesPage> {
+class _AddSalesPageState extends State<AddSalesPage> {
   final _formKey = GlobalKey<FormState>();
   String? _selectedCustomerId;
   String? _selectedCustomerName;
@@ -18,12 +19,33 @@ class _SalesPageState extends State<SalesPage> {
   final TextEditingController _priceController = TextEditingController();
   bool _isSubmitting = false;
   double _totalPrice = 0.0;
+  String _globalMilkPrice = '';
 
   void _updateTotalPrice() {
     final liters = double.tryParse(_litersController.text.trim()) ?? 0.0;
     final pricePerLiter = double.tryParse(_priceController.text.trim()) ?? 0.0;
     setState(() {
       _totalPrice = liters * pricePerLiter;
+    });
+  }
+
+  Future<void> _loadGlobalMilkPrice() async {
+    final prefs = await SharedPreferences.getInstance();
+    final price = prefs.getString('globalMilkPrice');
+    print('DEBUG: Loading global milk price in AddSalesPage: $price');
+    
+    setState(() {
+      if (price != null && price.isNotEmpty && price != '0') {
+        print('DEBUG: Setting global milk price in AddSalesPage: $price');
+        _globalMilkPrice = price;
+        // Set the price controller to the global price if it's empty
+        if (_priceController.text.isEmpty) {
+          _priceController.text = price;
+        }
+      } else {
+        print('DEBUG: No valid global milk price found in AddSalesPage');
+        _globalMilkPrice = '';
+      }
     });
   }
 
@@ -39,6 +61,7 @@ class _SalesPageState extends State<SalesPage> {
     super.initState();
     _litersController.addListener(_updateTotalPrice);
     _priceController.addListener(_updateTotalPrice);
+    _loadGlobalMilkPrice();
   }
 
   Future<void> _saveSale() async {
@@ -105,7 +128,7 @@ class _SalesPageState extends State<SalesPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FA),
       appBar: AppBar(
-        title: const Text('Record Sale'),
+        title: const Text('Add Sales'),
         backgroundColor: Colors.teal.shade700,
         elevation: 0,
       ),
@@ -167,12 +190,14 @@ class _SalesPageState extends State<SalesPage> {
                                 final data = selectedDoc.data() as Map<String, dynamic>;
                                 _selectedCustomerName = data['name'];
                                 _selectedCustomerData = data;
-                                // Set the price field to the customer's milk price if available
+                                // Set the price field to the customer's milk price if available, otherwise use global price
                                 final milkPrice = data['milkPrice'];
-                                if (milkPrice != null && milkPrice.toString().isNotEmpty) {
+                                if (milkPrice != null && milkPrice.toString().isNotEmpty && milkPrice.toString() != '0') {
                                   _priceController.text = milkPrice.toString();
+                                } else if (_globalMilkPrice.isNotEmpty && _globalMilkPrice != '0') {
+                                  _priceController.text = _globalMilkPrice;
                                 } else {
-                                  _priceController.clear(); // Price is cleared ONLY when customer changes
+                                  _priceController.clear();
                                 }
                               });
                             },
@@ -225,6 +250,18 @@ class _SalesPageState extends State<SalesPage> {
                         textInputAction: TextInputAction.done,
                         onFieldSubmitted: (_) => _saveSale(),
                       ),
+                      if (_globalMilkPrice.isNotEmpty && _globalMilkPrice != '0')
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Text(
+                            'Global price: ₹$_globalMilkPrice',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.green.shade700,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
                      const SizedBox(height: 12),
                      Container(
                        padding: const EdgeInsets.symmetric(vertical: 8),
@@ -255,257 +292,9 @@ class _SalesPageState extends State<SalesPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            if (_selectedCustomerId != null)
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                      child: Text('History for $_selectedCustomerName', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                    ),
-                    const Divider(height: 20),
-                    Expanded(
-                      child: StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collection('sales')
-                            .where('customerId', isEqualTo: _selectedCustomerId)
-                            .orderBy('createdAt', descending: true)
-                            .snapshots(),
-                        builder: (context, salesSnapshot) {
-                          if (salesSnapshot.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-                          if (salesSnapshot.hasError) {
-                            return Center(child: Text('Error: ${salesSnapshot.error}', style: const TextStyle(color: Colors.red)));
-                          }
-                          final salesDocs = salesSnapshot.data?.docs ?? [];
-                          if (salesDocs.isEmpty) {
-                            return const Center(child: Text('No sales found for this customer.'));
-                          }
-                          // This part onwards is for displaying sales, payments, and balance.
-                          // It will only render if the above stream is successful.
-                          return _buildSalesAndPaymentsView(salesDocs);
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
           ],
         ),
       ),
     );
-  }
-
-  // Helper widget to avoid deep nesting in the main build method
-  Widget _buildSalesAndPaymentsView(List<QueryDocumentSnapshot> salesDocs) {
-    double totalAmount = 0;
-    for (final doc in salesDocs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final price = data['price'];
-      final liters = data['liters'];
-      double priceNum = 0;
-      double litersNum = 0;
-      if (price is num) priceNum = price.toDouble();
-      else if (price is String) priceNum = double.tryParse(price) ?? 0;
-      if (liters is num) litersNum = liters.toDouble();
-      else if (liters is String) litersNum = double.tryParse(liters) ?? 0;
-      totalAmount += priceNum * litersNum;
-    }
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('payments')
-          .where('customerId', isEqualTo: _selectedCustomerId)
-          .snapshots(),
-      builder: (context, paymentsSnapshot) {
-        if (paymentsSnapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (paymentsSnapshot.hasError) {
-          return Center(child: Text('Error loading payments: ${paymentsSnapshot.error}', style: const TextStyle(color: Colors.red)));
-        }
-
-        final paymentDocs = paymentsSnapshot.data?.docs ?? [];
-        double totalPaid = 0;
-        for (final doc in paymentDocs) {
-          final data = doc.data() as Map<String, dynamic>;
-          final amount = data['amount'];
-          if (amount is num) totalPaid += amount;
-        }
-
-        final remaining = totalAmount - totalPaid;
-
-        return ListView.builder( // Changed Column to ListView.builder
-          itemCount: salesDocs.length + 3, // Add 3 for the summary rows
-          itemBuilder: (context, i) {
-            if (i < salesDocs.length) {
-              final data = salesDocs[i].data() as Map<String, dynamic>;
-              final date = (data['createdAt'] as Timestamp?)?.toDate();
-              return Card(
-                elevation: 1,
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                child: ListTile(
-                  leading: CircleAvatar(backgroundColor: Colors.teal.withOpacity(0.1), child: const Icon(Icons.receipt_long, color: Colors.teal)),
-                  title: Text('₹ ${data['price'] ?? '0.0'} for ${data['liters'] ?? '0'} L'),
-                  subtitle: date != null ? Text('${date.day}/${date.month}/${date.year} at ${date.hour}:${date.minute.toString().padLeft(2, '0')}') : null,
-                ),
-              );
-            } else if (i == salesDocs.length) {
-              return const SizedBox(height: 10); // Space before the button
-            } else if (i == salesDocs.length + 1) {
-              return SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.payments_outlined),
-                  label: const Text('Receive Payment'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: () => _showReceivePaymentDialog(),
-                ),
-              );
-            } else { // i == salesDocs.length + 2
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Divider(),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _buildBalanceRow('Total Sale:', '₹ ${totalAmount.toStringAsFixed(2)}', Colors.teal),
-                        _buildBalanceRow('Total Paid:', '₹ ${totalPaid.toStringAsFixed(2)}', Colors.green.shade700),
-                        _buildBalanceRow('Remaining:', '₹ ${remaining.toStringAsFixed(2)}', Colors.red, isBold: true),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            }
-          },
-        );
-      },
-    );
-  }
-
-  // Helper for displaying balance rows
-  Widget _buildBalanceRow(String label, String value, Color color, {bool isBold = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 8.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(fontSize: 16, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-          Text(value, style: TextStyle(fontSize: 16, color: color, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-        ],
-      ),
-    );
-  }
-
-  // Helper for showing the payment dialog
-  Future<void> _showReceivePaymentDialog() async {
-    final amountController = TextEditingController();
-    final result = await showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Receive Payment'),
-        content: TextField(
-          controller: amountController,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Amount Received', prefixIcon: Icon(Icons.currency_rupee)),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            child: const Text('Save'),
-            onPressed: () {
-              final value = double.tryParse(amountController.text.trim());
-              if (value != null && value > 0) {
-                Navigator.pop(context, value);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid amount.'), backgroundColor: Colors.orange));
-              }
-            },
-          ),
-        ],
-      ),
-    );
-
-    if (result != null && result > 0) {
-      try {
-        await FirebaseFirestore.instance.collection('payments').add({
-          'customerId': _selectedCustomerId,
-          'customerName': _selectedCustomerName,
-          'amount': result,
-          'receivedAt': FieldValue.serverTimestamp(),
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Payment of ₹${result.toStringAsFixed(2)} received!'), backgroundColor: Colors.green),
-          );
-        }
-        // After payment, check if remaining is zero and delete all bills if so
-        await _deleteBillsIfRemainingZero();
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error saving payment: $e'), backgroundColor: Colors.red));
-        }
-      }
-    }
-  }
-
-  Future<void> _deleteBillsIfRemainingZero() async {
-    // Calculate total sale and total paid
-    final salesSnapshot = await FirebaseFirestore.instance
-        .collection('sales')
-        .where('customerId', isEqualTo: _selectedCustomerId)
-        .get();
-    double totalSale = 0;
-    for (final doc in salesSnapshot.docs) {
-      final data = doc.data();
-      final price = data['price'];
-      final liters = data['liters'];
-      double priceNum = 0;
-      double litersNum = 0;
-      if (price is num) priceNum = price.toDouble();
-      else if (price is String) priceNum = double.tryParse(price) ?? 0;
-      if (liters is num) litersNum = liters.toDouble();
-      else if (liters is String) litersNum = double.tryParse(liters) ?? 0;
-      totalSale += priceNum * litersNum;
-    }
-    final paymentsSnapshot = await FirebaseFirestore.instance
-        .collection('payments')
-        .where('customerId', isEqualTo: _selectedCustomerId)
-        .get();
-    double totalPaid = 0;
-    for (final doc in paymentsSnapshot.docs) {
-      final data = doc.data();
-      final amount = data['amount'];
-      if (amount is num) totalPaid += amount;
-      else if (amount is String) totalPaid += double.tryParse(amount) ?? 0;
-    }
-    final remaining = totalSale - totalPaid;
-    if (remaining.abs() < 0.01) { // allow for floating point error
-      // Delete all sales
-      for (final doc in salesSnapshot.docs) {
-        await doc.reference.delete();
-      }
-      // Delete all payments
-      for (final doc in paymentsSnapshot.docs) {
-        await doc.reference.delete();
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('All bills cleared and deleted for this customer!'), backgroundColor: Colors.green),
-        );
-      }
-    }
   }
 }

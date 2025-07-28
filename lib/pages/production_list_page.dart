@@ -22,11 +22,22 @@ class _ProductionListPageState extends State<ProductionListPage> {
   final _firestore = FirebaseFirestore.instance;
   Set<String> _selectedRecordIds = {};
   bool _selectAll = false;
+  String? _selectedCowId;
+  List<String> _availableCowIds = [];
+  TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _loadUserType();
+    _fetchAvailableCowIds();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUserType() async {
@@ -67,24 +78,40 @@ class _ProductionListPageState extends State<ProductionListPage> {
     }
   }
 
+  Future<void> _fetchAvailableCowIds() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    Query query = _firestore.collection('productions');
+    if (!_isAdmin) {
+      query = query.where('userId', isEqualTo: user.uid);
+    }
+    final snapshot = await query.get();
+    final cowIds = <String>{};
+    for (var doc in snapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['cowId'] != null && data['cowId'].toString().isNotEmpty) {
+        cowIds.add(data['cowId'].toString());
+      }
+    }
+    setState(() {
+      _availableCowIds = cowIds.toList();
+    });
+  }
+
   Stream<QuerySnapshot> _getProductionsStream() {
     final user = _auth.currentUser;
     if (user == null) return const Stream.empty();
-
-    final query = _firestore.collection('productions');
-    
+    Query query = _firestore.collection('productions');
     if (_isAdmin) {
       // Admins can see all records
-      return query
-          .orderBy('productionDate', descending: true)
-          .snapshots();
     } else {
       // Staff can only see their own records
-      return query
-          .where('userId', isEqualTo: user.uid)
-          .orderBy('productionDate', descending: true)
-          .snapshots();
+      query = query.where('userId', isEqualTo: user.uid);
     }
+    if (_selectedCowId != null && _selectedCowId!.isNotEmpty) {
+      query = query.where('cowId', isEqualTo: _selectedCowId);
+    }
+    return query.orderBy('productionDate', descending: true).snapshots();
   }
 
   Future<void> _checkDuplicateEntry(String cowId, DateTime date, String session) async {
@@ -325,254 +352,279 @@ class _ProductionListPageState extends State<ProductionListPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _refreshData,
+            onPressed: () {
+              _refreshData();
+              _fetchAvailableCowIds();
+            },
             tooltip: 'Refresh',
           ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _getProductionsStream(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: Colors.red,
-                    size: 60,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error loading records: ${snapshot.error}', // Corrected interpolation
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _refreshData,
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
-          }
-
-          final docs = snapshot.data?.docs ?? [];
-          if (docs.isEmpty) {
-            // Updated to use a consistent "Add Record" button at the bottom for an empty state
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.note_alt_outlined,
-                    size: 60,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _isAdmin 
-                      ? 'No production records found'
-                      : 'You haven\'t added any records yet',
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                  const SizedBox(height: 8),
-                  // The FloatingActionButton already handles adding records,
-                  // so no need for an extra button here if the FAB is always visible.
-                  // If you want a button here specifically for empty state, keep it.
-                ],
-              ),
-            );
-          }
-
-          // Refactor: Fixed summary at top, scrollable records below
-          return Column(
-            children: [
-              if (_isAdmin)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: _selectAll,
-                        onChanged: (val) => _toggleSelectAll(docs),
-                      ),
-                      const Text('Select All'),
-                      const Spacer(),
-                      IconButton(
-                        icon: Icon(
-                          Icons.picture_as_pdf,
-                          size: 32,
-                          color: Theme.of(context).colorScheme.secondary,
-                        ),
-                        tooltip: 'Download Selected as PDF',
-                        onPressed: _selectedRecordIds.isEmpty ? null : () async {
-                          await _downloadSelectedAsPdf(docs);
+      body: Column(
+        children: [
+          const SizedBox(height: 16), // Add gap between AppBar and search bar
+          // Search bar for cow ID
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: 'Search by Cow ID',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            _searchQuery = '';
+                            _searchController.clear();
+                          });
                         },
-                      ),
-                    ],
-                  ),
-                ),
-              if (!_isAdmin) _buildSummarySection(snapshot.data!),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: docs.length,
-                  itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    final date = (data['productionDate'] as Timestamp).toDate();
-                    final quantity = data['quantityInLiters']?.toString() ?? '0';
-                    final cowName = data['cowName'] ?? 'Unknown Cow';
-                    final cowId = data['cowId'] ?? 'Unknown ID';
-                    final session = data['session'] ?? 'Unknown Session';
-                    final recordUserId = data['userId'] ?? '';
-                    final username = data['username'] ?? 'Unknown User';
-                    final notes = data['notes'] as String?;
+                      )
+                    : null,
+              ),
+              onChanged: (val) {
+                setState(() {
+                  _searchQuery = val;
+                });
+              },
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _getProductionsStream(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          color: Colors.red,
+                          size: 60,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Error loading records:  {snapshot.error}', // Corrected interpolation
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _refreshData,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
 
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      elevation: 2, // Ensure consistency with summary
-                      shape: RoundedRectangleBorder( // Ensure consistency with summary
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          if (_isAdmin)
+                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
+
+                final docs = snapshot.data?.docs ?? [];
+                return Column(
+                  children: [
+                    if (!_isAdmin && snapshot.hasData)
+                      _buildSummarySection(snapshot.data!),
+                    if (_isAdmin && docs.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        child: Row(
+                          children: [
                             Checkbox(
-                              value: _selectedRecordIds.contains(doc.id),
-                              onChanged: (val) => _toggleSelectRecord(doc.id),
+                              value: _selectAll,
+                              onChanged: (val) => _toggleSelectAll(docs),
                             ),
-                          Expanded(
-                            child: ListTile(
-                              title: Row(
+                            const Text('Select All'),
+                            const Spacer(),
+                            IconButton(
+                              icon: Icon(
+                                Icons.download,
+                                size: 32,
+                                color: Theme.of(context).colorScheme.secondary,
+                              ),
+                              tooltip: 'Download Selected as PDF',
+                              onPressed: _selectedRecordIds.isEmpty ? null : () async {
+                                await _downloadSelectedAsPdf(docs);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (docs.isEmpty)
+                      Expanded(
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                Icons.note_alt_outlined,
+                                size: 60,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _isAdmin 
+                                  ? 'No production records found'
+                                  : 'You haven\'t added any records yet',
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: docs.where((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            final cowId = data['cowId']?.toString() ?? '';
+                            return cowId.toLowerCase().contains(_searchQuery.toLowerCase());
+                          }).length,
+                          itemBuilder: (context, index) {
+                            final filteredDocs = docs.where((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+                              final cowId = data['cowId']?.toString() ?? '';
+                              return cowId.toLowerCase().contains(_searchQuery.toLowerCase());
+                            }).toList();
+                            final doc = filteredDocs[index];
+                            final data = doc.data() as Map<String, dynamic>;
+                            final date = (data['productionDate'] as Timestamp).toDate();
+                            final quantity = data['quantityInLiters']?.toString() ?? '0';
+                            final cowName = data['cowName'] ?? 'Unknown Cow';
+                            final cowId = data['cowId'] ?? 'Unknown ID';
+                            final session = data['session'] ?? 'Unknown Session';
+                            final recordUserId = data['userId'] ?? '';
+                            final username = data['username'] ?? 'Unknown User';
+                            final notes = data['notes'] as String?;
+                            return Card(
+                              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              elevation: 2, // Ensure consistency with summary
+                              shape: RoundedRectangleBorder( // Ensure consistency with summary
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
                                 children: [
+                                  if (_isAdmin)
+                                    Checkbox(
+                                      value: _selectedRecordIds.contains(doc.id),
+                                      onChanged: (val) => _toggleSelectRecord(doc.id),
+                                    ),
                                   Expanded(
-                                    child: Text(
-                                      '${DateFormat('dd/MM/yyyy').format(date)} - $session',
-                                      style: const TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(context).primaryColor.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      '$quantity L',
-                                      style: TextStyle(
-                                        color: Theme.of(context).primaryColor,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(height: 4),
-                                  // Only show cow name if it is not 'Unknown Cow'
-                                  if (cowName != 'Unknown Cow')
-                                    Text('Cow: $cowName (ID: $cowId)'),
-                                  if (notes?.isNotEmpty == true) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Notes: $notes',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey[600],
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                    ),
-                                  ],
-                                  if (_isAdmin && username.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Added by: $username',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey[600],
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              isThreeLine: true,
-                              trailing: FutureBuilder<bool>(
-                                future: _canModifyRecord(recordUserId),
-                                builder: (context, snapshot) {
-                                  final canModify = snapshot.data ?? false;
-                                  
-                                  // Only show edit/delete icons if the user can modify
-                                  if (!canModify) {
-                                    return const SizedBox.shrink(); // Hide the icons
-                                  }
-
-                                  return Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.edit),
-                                        onPressed: () async {
-                                          final result = await Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (context) => MilkProductionPage(
-                                                existingProduction: data,
-                                                documentId: doc.id,
+                                    child: ListTile(
+                                      title: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '${DateFormat('dd/MM/yyyy').format(date)} - $session',
+                                              style: const TextStyle(fontWeight: FontWeight.bold),
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(context).primaryColor.withOpacity(0.1),
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            child: Text(
+                                              '$quantity L',
+                                              style: TextStyle(
+                                                color: Theme.of(context).primaryColor,
+                                                fontWeight: FontWeight.bold,
                                               ),
                                             ),
-                                          );
-                                          if (result == true) {
-                                            _refreshData();
+                                          ),
+                                        ],
+                                      ),
+                                      subtitle: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const SizedBox(height: 4),
+                                          // Only show cow name if it is not 'Unknown Cow'
+                                          if (cowName != 'Unknown Cow')
+                                            Text('Cow: $cowName (ID: $cowId)'),
+                                          if (notes?.isNotEmpty == true) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Notes: $notes',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey[600],
+                                                fontStyle: FontStyle.italic,
+                                              ),
+                                            ),
+                                          ],
+                                          if (_isAdmin && username.isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Added by: $username',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey[600],
+                                                fontStyle: FontStyle.italic,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      isThreeLine: true,
+                                      trailing: FutureBuilder<bool>(
+                                        future: _canModifyRecord(recordUserId),
+                                        builder: (context, snapshot) {
+                                          final canModify = snapshot.data ?? false;
+                                          if (!canModify) {
+                                            return const SizedBox.shrink();
                                           }
+                                          return Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                icon: const Icon(Icons.edit),
+                                                onPressed: () async {
+                                                  final result = await Navigator.push(
+                                                    context,
+                                                    MaterialPageRoute(
+                                                      builder: (context) => MilkProductionPage(
+                                                        existingProduction: data,
+                                                        documentId: doc.id,
+                                                      ),
+                                                    ),
+                                                  );
+                                                  if (result == true) {
+                                                    _refreshData();
+                                                  }
+                                                },
+                                                tooltip: 'Edit',
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.delete, color: Colors.red),
+                                                onPressed: () => _deleteRecord(doc.id, cowName),
+                                                tooltip: 'Delete',
+                                              ),
+                                            ],
+                                          );
                                         },
-                                        tooltip: 'Edit',
                                       ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete, color: Colors.red),
-                                        onPressed: () => _deleteRecord(doc.id, cowName),
-                                        tooltip: 'Delete',
-                                      ),
-                                    ],
-                                  );
-                                },
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ),
-                        ],
+                            );
+                          },
+                        ),
                       ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const MilkProductionPage(),
+                  ],
+                );
+              },
             ),
-          );
-          if (result == true) {
-            _refreshData();
-          }
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Add Record'),
+          ),
+        ],
       ),
     );
   }

@@ -5,10 +5,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'pages/add_customer_page.dart';
-import 'pages/sales_page.dart'; // Added import for SalesPage
+import 'pages/customer_list_page.dart';
+import 'pages/add_sales_page.dart';
+import 'pages/sales_history_page.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'pages/expenses_page.dart';
+import 'pages/expenses_transaction_page.dart';
+import 'pages/expenses_transaction_details_page.dart';
 import 'pages/settings_page.dart';
+import 'pages/milk_production_page.dart'; // Added import for MilkProductionPage
+import 'pages/customer_transaction_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
@@ -141,9 +147,28 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        child: ListView.builder(
-          itemCount: (() {
+        child: GridView.builder(
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+            childAspectRatio: 1,
+          ),
+          itemCount: () {
             final actions = [
+              _DashboardAction(
+                title: 'Add Production',
+                subtitle: 'Record new milk production',
+                icon: Icons.add_box,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const MilkProductionPage(),
+                    ),
+                  );
+                },
+              ),
               _DashboardAction(
                 title: 'Production',
                 subtitle: 'Track milk production for each cow',
@@ -158,20 +183,72 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
               _DashboardAction(
-                title: 'Sales',
-                subtitle: 'Record customer sales and details',
-                icon: Icons.shopping_cart,
+                title: 'Add Sales',
+                subtitle: 'Record new sales transactions',
+                icon: Icons.add_shopping_cart,
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const SalesPage(),
+                      builder: (context) => const AddSalesPage(),
                     ),
                   );
                 },
               ),
               _DashboardAction(
-                title: 'Expenses',
+                title: 'Sales History',
+                subtitle: 'View all sales records',
+                icon: Icons.history,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SalesHistoryPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Add Customer',
+                subtitle: 'Add and manage your customers',
+                icon: Icons.person_add,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AddCustomerPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Customer List',
+                subtitle: 'View and edit all customers',
+                icon: Icons.people,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CustomerListPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Customer Transaction',
+                subtitle: 'View customer sales and payments',
+                icon: Icons.receipt_long,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CustomerTransactionPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Add Expenses',
                 subtitle: 'Track expenses and reasons',
                 icon: Icons.account_balance_wallet,
                 onTap: () {
@@ -184,14 +261,27 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
               _DashboardAction(
-                title: 'Add Customers',
-                subtitle: 'Add and manage your customers',
-                icon: Icons.person_add,
+                title: 'Expenses History',
+                subtitle: 'View all expenses history',
+                icon: Icons.receipt_long,
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const AddCustomerPage(),
+                      builder: (context) => const ExpensesTransactionPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Expenses Transaction',
+                subtitle: 'View vendor-wise expenses',
+                icon: Icons.account_balance_wallet,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ExpensesTransactionDetailsPage(),
                     ),
                   );
                 },
@@ -219,10 +309,23 @@ class _HomePageState extends State<HomePage> {
               ));
             }
             return actions.length;
-          })(),
+          }(),
           itemBuilder: (context, i) {
             final accentColor = Colors.teal.shade700;
-            final actions = [
+            final actions = <_DashboardAction>[
+              _DashboardAction(
+                title: 'Add Production',
+                subtitle: 'Record new milk production',
+                icon: Icons.add_box,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const MilkProductionPage(),
+                    ),
+                  );
+                },
+              ),
               _DashboardAction(
                 title: 'Production',
                 subtitle: 'Track milk production for each cow',
@@ -237,20 +340,72 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
               _DashboardAction(
-                title: 'Sales',
-                subtitle: 'Record customer sales and details',
-                icon: Icons.shopping_cart,
+                title: 'Add Sales',
+                subtitle: 'Record new sales transactions',
+                icon: Icons.add_shopping_cart,
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const SalesPage(),
+                      builder: (context) => const AddSalesPage(),
                     ),
                   );
                 },
               ),
               _DashboardAction(
-                title: 'Expenses',
+                title: 'Sales History',
+                subtitle: 'View all sales records',
+                icon: Icons.history,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SalesHistoryPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Add Customer',
+                subtitle: 'Add and manage your customers',
+                icon: Icons.person_add,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AddCustomerPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Customer List',
+                subtitle: 'View and edit all customers',
+                icon: Icons.people,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CustomerListPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Customer Transaction',
+                subtitle: 'View customer sales and payments',
+                icon: Icons.receipt_long,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CustomerTransactionPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Add Expenses',
                 subtitle: 'Track expenses and reasons',
                 icon: Icons.account_balance_wallet,
                 onTap: () {
@@ -263,14 +418,27 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
               _DashboardAction(
-                title: 'Add Customers',
-                subtitle: 'Add and manage your customers',
-                icon: Icons.person_add,
+                title: 'Expenses History',
+                subtitle: 'View all expenses history',
+                icon: Icons.receipt_long,
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const AddCustomerPage(),
+                      builder: (context) => const ExpensesTransactionPage(),
+                    ),
+                  );
+                },
+              ),
+              _DashboardAction(
+                title: 'Expenses Transaction',
+                subtitle: 'View vendor-wise expenses',
+                icon: Icons.account_balance_wallet,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ExpensesTransactionDetailsPage(),
                     ),
                   );
                 },
@@ -297,10 +465,10 @@ class _HomePageState extends State<HomePage> {
                 },
               ));
             }
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: actions[i].build(context, accentColor),
-            );
+            if (i < actions.length) {
+              return actions[i].build(context, accentColor);
+            }
+            return const SizedBox.shrink();
           },
         ),
       ),
@@ -332,46 +500,49 @@ class _DashboardAction {
         child: InkWell(
           borderRadius: BorderRadius.circular(18),
           onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.grey[200]!, width: 1.2),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: accentColor.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(12),
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.grey[200]!, width: 1.2),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: accentColor.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 30,
+                      color: accentColor,
+                    ),
                   ),
-                  child: Icon(
-                    icon,
-                    size: 30,
-                    color: accentColor,
+                  const SizedBox(height: 16),
+                  Text(
+                    title,
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: accentColor,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  title,
-                  style: GoogleFonts.poppins(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: accentColor,
+                  const SizedBox(height: 7),
+                  Text(
+                    subtitle,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      color: Colors.grey[600],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  subtitle,
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12.5,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

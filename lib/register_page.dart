@@ -20,6 +20,12 @@ class _RegisterPageState extends State<RegisterPage> {
   bool isLoading = false;
   bool obscurePassword = true;
 
+  @override
+  void initState() {
+    super.initState();
+    typeController.text = 'staff'; // Set default user type
+  }
+
   void showMessage(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -32,31 +38,30 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> registerUser() async {
+    // Validate all required fields
     if (emailController.text.isEmpty || 
         phoneController.text.isEmpty ||
         passwordController.text.isEmpty || 
-        typeController.text.isEmpty ||
         usernameController.text.isEmpty) {
       showMessage("All fields are required");
       return;
     }
-    // Validate phone number (basic check)
+    
+    // Validate email format
+    final email = emailController.text.trim();
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+      showMessage("Please enter a valid email address");
+      return;
+    }
+    
+    // Validate phone number
     final phone = phoneController.text.trim();
     if (!RegExp(r'^\d{10}$').hasMatch(phone)) {
       showMessage("Please enter a valid 10-digit phone number");
       return;
     }
-    // Check if phone number already exists
-    final phoneQuery = await FirebaseFirestore.instance
-        .collection('users')
-        .where('phone', isEqualTo: phone)
-        .get();
-    if (phoneQuery.docs.isNotEmpty) {
-      showMessage("Phone number already registered. Please use another.");
-      return;
-    }
-
-    // Validate username (no spaces, special characters, etc.)
+    
+    // Validate username
     final username = usernameController.text.trim();
     if (username.length < 3) {
       showMessage("Username must be at least 3 characters long");
@@ -66,12 +71,31 @@ class _RegisterPageState extends State<RegisterPage> {
       showMessage("Username can only contain letters, numbers, and underscores");
       return;
     }
+    
+    // Validate password
+    final password = passwordController.text.trim();
+    if (password.length < 6) {
+      showMessage("Password must be at least 6 characters long");
+      return;
+    }
 
     setState(() {
       isLoading = true;
     });
 
     try {
+      // Check if phone number already exists
+      final phoneQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: phone)
+          .get();
+          
+      if (phoneQuery.docs.isNotEmpty) {
+        showMessage("Phone number already registered. Please use another.");
+        setState(() { isLoading = false; });
+        return;
+      }
+
       // Check if username already exists
       final usernameQuery = await FirebaseFirestore.instance
           .collection('users')
@@ -80,56 +104,42 @@ class _RegisterPageState extends State<RegisterPage> {
 
       if (usernameQuery.docs.isNotEmpty) {
         showMessage("Username already taken. Please choose another one.");
-        setState(() {
-          isLoading = false;
-        });
+        setState(() { isLoading = false; });
+        return;
+      }
+
+      // Check if email already exists
+      final emailQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .get();
+
+      if (emailQuery.docs.isNotEmpty) {
+        showMessage("Email already registered. Please use another.");
+        setState(() { isLoading = false; });
         return;
       }
 
       // Create user with Firebase Auth
       final UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
-              email: emailController.text.trim(),
-              password: passwordController.text.trim());
+              email: email,
+              password: password);
 
-      // Wait for auth state to be ready (important for web)
-      User? user;
-      await for (final u in FirebaseAuth.instance.authStateChanges()) {
-        if (u != null) {
-          user = u;
-          break;
-        }
-      }
-      print('Current user after authStateChanges: ' + user.toString());
-      print('Current user UID: ' + (user?.uid ?? 'null'));
-      print('Current user email: ' + (user?.email ?? 'null'));
+      final user = userCredential.user;
+      
       if (user != null) {
-        try {
-          // Test write to a test collection
-          await FirebaseFirestore.instance.collection('test').add({'test': 'value', 'uid': user.uid, 'email': user.email});
-          print('Test write to test collection succeeded.');
-        } catch (testWriteError) {
-          print('Test write to test collection failed: ' + testWriteError.toString());
-        }
-        try {
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .set({
-            'email': emailController.text.trim(),
-            'phone': phoneController.text.trim(),
-            'username': username,
-            'type': typeController.text.trim().isNotEmpty ? typeController.text.trim() : 'staff',
-            'createdAt': FieldValue.serverTimestamp(),
-          });
-        } catch (firestoreError) {
-          print('Firestore write error: ' + firestoreError.toString());
-          showMessage('Firestore error: ' + firestoreError.toString());
-          setState(() {
-            isLoading = false;
-          });
-          return;
-        }
+        // Create user document in Firestore
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set({
+          'email': email,
+          'phone': phone,
+          'username': username,
+          'type': typeController.text.trim().isNotEmpty ? typeController.text.trim() : 'staff',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
 
         showMessage("Registration successful! Please login.");
         if (mounted) {
@@ -157,7 +167,7 @@ class _RegisterPageState extends State<RegisterPage> {
       showMessage(msg);
     } catch (e) {
       print('Registration error: $e');
-      showMessage('An unexpected error occurred. Please try again. ($e)');
+      showMessage('An unexpected error occurred. Please try again.');
     } finally {
       if (mounted) {
         setState(() {
@@ -373,11 +383,11 @@ class _RegisterPageState extends State<RegisterPage> {
                 FadeInDown(
                   delay: const Duration(milliseconds: 1200),
                   duration: const Duration(milliseconds: 1200),
-                  child: TextFormField(
-                    controller: typeController,
+                  child: DropdownButtonFormField<String>(
+                    value: typeController.text.isEmpty ? null : typeController.text,
                     decoration: InputDecoration(
                       labelText: 'User Type',
-                      hintText: 'Enter user type (admin/staff)',
+                      hintText: 'Select user type',
                       prefixIcon: const Icon(Icons.badge),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -391,6 +401,15 @@ class _RegisterPageState extends State<RegisterPage> {
                         borderSide: BorderSide(color: Colors.teal.shade800),
                       ),
                     ),
+                    items: const [
+                      DropdownMenuItem(value: 'staff', child: Text('Staff')),
+                      DropdownMenuItem(value: 'admin', child: Text('Admin')),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        typeController.text = value ?? 'staff';
+                      });
+                    },
                   ),
                 ),
                 const SizedBox(height: 30),
